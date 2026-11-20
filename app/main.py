@@ -9,6 +9,12 @@ from pydantic import BaseModel
 from qdrant_client import QdrantClient, models as qm
 import zlib, asyncio
 
+# serverless hosts (e.g. Vercel) have a read-only filesystem except /tmp: keep all model caches there
+os.environ.setdefault("FASTEMBED_CACHE_PATH", "/tmp/fastembed_cache")
+os.environ.setdefault("HF_HOME", "/tmp/hf")
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+os.environ.setdefault("XDG_CACHE_HOME", "/tmp/.cache")
+
 try:  # preferred: lightweight ONNX embeddings (used in the Docker image)
     from fastembed import TextEmbedding, SparseTextEmbedding
     HAVE_FASTEMBED = True
@@ -21,6 +27,15 @@ DATA = BASE.parent / "data"
 STORE = pathlib.Path(os.environ.get("STORE_DIR", "/tmp/dgbot"))
 STORE.mkdir(parents=True, exist_ok=True)
 KB_DATE = "2026-11-19"
+
+# load KEY=VALUE pairs from a local .env (never overrides real environment variables)
+_envf = BASE.parent / ".env"
+if _envf.exists():
+    for _ln in _envf.read_text(encoding="utf-8").splitlines():
+        _ln = _ln.strip()
+        if _ln and not _ln.startswith("#") and "=" in _ln:
+            _k, _v = _ln.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
 # ---------- LLM provider (Groq or OpenRouter, OpenAI-compatible) ----------
 if os.environ.get("GROQ_API_KEY"):
@@ -152,6 +167,13 @@ def build_chunks():
 
 def ingest():
     chunks = build_chunks()
+    try:  # cloud collection already holds this exact knowledge base: skip the slow re-embed on cold starts
+        if qc.collection_exists(COLL) and qc.count(COLL, exact=True).count == len(chunks) \
+                and os.environ.get("FORCE_REINGEST") != "1":
+            log.warning("collection %s already has %d chunks; skipping ingest", COLL, len(chunks))
+            return len(chunks)
+    except Exception:
+        pass
     docs = [f"{c['company']} - {c['section']}: {c['text']}" for c in chunks]
     dvec = dense_docs(docs)
     svec = sparse_docs(docs)

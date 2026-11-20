@@ -1,3 +1,13 @@
+---
+title: DarGlobal Wasalt Assistant
+emoji: 🏙️
+colorFrom: gray
+colorTo: red
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # DarGlobal & Wasalt Assistant
 
 RAG chatbot over public data from darglobal.co.uk and wasalt.sa (`data/*.md`, collected 2026-11-19).
